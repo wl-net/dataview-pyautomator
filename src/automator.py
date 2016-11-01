@@ -22,9 +22,8 @@ def constant_time_equals(val1, val2):
     return result == 0
 
 
-
 class DataviewRPCServer(aiohttp.server.ServerHttpProtocol):
-    class InsufficentTokenLength(Exception):
+    class InsufficientTokenLength(Exception):
         pass
 
     def __init__(self, dispatch_functions, auth_token):
@@ -102,11 +101,13 @@ class DataviewRPCServer(aiohttp.server.ServerHttpProtocol):
         except KeyError:
             response = {}
 
-        if payload['method'] not in self.dispatch_functions:
-              response = {'jsonrpc': '2.0',
-                          'error': {'code': -32601, 'message': 'Method not found'},
-                          'id': payload['id']}
-              return str.encode(json.dumps(response) + '\n')
+        if 'method' in payload:
+            if payload['method'] not in self.dispatch_functions:
+                  response = {'jsonrpc': '2.0',
+                              'error': {'code': -32601, 'message': 'Method not found'},
+                              'id': payload['id']}
+                  return str.encode(json.dumps(response) + '\n')
+            # TODO handle missing method
 
         if 'params' not in payload:
             response['result'] = self.dispatch_functions[payload['method']]()
@@ -125,6 +126,7 @@ class BaseController(object):
 
     def health(self):
         return "OK"
+
 
 def prompt(controller):
     ARGS = argparse.ArgumentParser(description='Run automator')
@@ -155,7 +157,7 @@ def start(controller, cert, key, host, port, unit_test=False):
 
     sslcontext.load_cert_chain(cert, key)
 
-    loop = asyncio.new_event_loop()
+    loop = asyncio.get_event_loop()
 
     server = loop.create_server(
         lambda: DataviewRPCServer(
@@ -167,6 +169,7 @@ def start(controller, cert, key, host, port, unit_test=False):
     socks = svr.sockets
     print('Server started. Waiting for connections on ', socks[0].getsockname())
     if unit_test:
+        print('Entering unit test mode..')
         def loop_in_thread(loop):
             #asyncio.set_event_loop(loop)
             print("background...")
@@ -179,9 +182,9 @@ def start(controller, cert, key, host, port, unit_test=False):
         t.start()
         return loop
     try:
-       loop.run_forever()
+        loop.run_forever()
     except KeyboardInterrupt:
-       pass
+        pass
 
 if __name__ == '__main__':
     start(BaseController(), '../cert.pem', '../server.pem', '0.0.0.0', 6000)

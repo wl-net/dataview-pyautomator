@@ -5,6 +5,9 @@ assert sys.version >= '3.3', 'Please use Python 3.3 or higher.'
 import argparse
 import os
 import ssl
+import hashlib
+import binascii
+import requests
 import json
 
 
@@ -20,6 +23,90 @@ def constant_time_equals(val1, val2):
     for x, y in zip(val1, val2):
         result |= ord(x) ^ ord(y)
     return result == 0
+
+
+class X509Certificate(object):
+    def __init__(self, filename=None):
+        self.filename = filename
+
+    @classmethod
+    def __current_dir(cls):
+        return os.path.dirname(os.path.realpath(__file__))
+
+    @classmethod
+    def create_from_str(cls, str):
+        filename = cls.__current_dir() + '/' + hashlib.sha256(str.encode('utf-8')).hexdigest() + '.pem'
+
+        with open(filename, 'w') as f:
+            f.write(str)
+
+        return X509Certificate(filename)
+
+    @classmethod
+    def get_file_from_str(cls, str):
+        filename = cls.__current_dir() + '/' + hashlib.sha256(str.encode('utf-8')).hexdigest() + '.pem'
+        if not os.path.exists(filename):
+            raise ValueError('Certificate does not exist')
+
+        return filename
+
+    def get_location(self):
+        if not self.filename:
+            raise ValueError('Certificate does not exist')
+
+        return self.filename
+
+
+class JSONRPCClient(object):
+    def __init__(self):
+        self.request_id = 1
+        self.target = None
+        self.apikey = None
+        self.certificate = None
+
+    def connect(self, target, apikey, certificate=None):
+        self.target = target
+        self.apikey = apikey
+        self.certificate = certificate
+
+    def disconnect(self):
+        pass # this transport does not stay open
+
+    def call(self, command, arguments):
+        req = {'jsonrpc': '2.0', 'method': command, 'params': arguments, 'id': self.request_id}
+        self.request_id += 1
+
+        if self.certificate:
+            try:
+                cert_file = X509Certificate.get_file_from_str(self.certificate)
+            except ValueError:
+                cert_file = X509Certificate.create_from_str(self.certificate).get_location()
+
+            request = requests.post(self.target, data=json.dumps(req),
+                              headers={'Authorization': 'Token ' + self.apikey},
+                              verify=cert_file)
+        else:
+            request = requests.post(self.target, data=json.dumps(req),
+                              headers={'Authorization': 'Token: ' + self.apikey})
+
+        if request.status_code == 200:
+            return request.json()['result']
+
+        request.raise_for_status()
+
+    @classmethod
+    def generate_random_token(cls):
+        """
+        generates a token suitable for authentication
+        :return:
+        """
+        return binascii.hexlify(os.urandom(32)).decode('utf-8')
+
+    def get_client(self):
+        return self.client
+
+    def healthcheck(self):
+        pass
 
 
 class DataviewRPCServer(aiohttp.server.ServerHttpProtocol):
